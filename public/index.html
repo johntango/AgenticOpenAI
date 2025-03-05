@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Multi-Agent Demo</title>
+    <!-- Bootstrap CSS (CDN) -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <style>
+      body.bg-secondary {
+        transition: background-color 0.5s ease;
+      }
+      .agent-card,
+      .tool-card {
+        border: 1px solid #ccc;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+      }
+    </style>
+  </head>
+  <body class="bg-light">
+    <div class="container py-4">
+      <h1 class="mb-4">Multi-Agent System</h1>
+
+      <button class="btn btn-primary mb-3" id="toggleBackgroundBtn">
+        Toggle Background
+      </button>
+
+      <!-- CREATE AGENT FORM -->
+      <div class="agent-card">
+        <h5>Create Agent</h5>
+        <div class="mb-3">
+          <label for="agentName" class="form-label">Name</label>
+          <input
+            type="text"
+            class="form-control"
+            id="agentName"
+            placeholder="Agent name"
+          />
+        </div>
+        <!-- Dropdown instead of text input for model selection -->
+        <div class="mb-3">
+          <label for="modelInput" class="form-label">Model</label>
+          <select id="modelInput" class="form-select">
+            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label for="agentInstructions" class="form-label">Instructions</label>
+          <textarea
+            class="form-control"
+            id="agentInstructions"
+            rows="2"
+            placeholder="e.g. You are a helpful agent."
+          ></textarea>
+        </div>
+        <button class="btn btn-success" id="createAgentBtn">
+          Create Agent
+        </button>
+      </div>
+
+      <!-- LIST AGENTS -->
+      <div class="agent-card">
+        <h5>Existing Agents</h5>
+        <button class="btn btn-secondary mb-3" id="refreshAgentsBtn">
+          Refresh List
+        </button>
+        <ul id="agentsList" class="list-group"></ul>
+      </div>
+
+      <!-- ADD TOOL TO AGENT -->
+      <div class="tool-card">
+        <h5>Add Tool to Agent</h5>
+        <div class="mb-3">
+          <label for="toolAgentId" class="form-label">Agent ID</label>
+          <input
+            type="number"
+            class="form-control"
+            id="toolAgentId"
+            placeholder="Agent ID"
+          />
+        </div>
+        <div class="mb-3">
+          <label for="toolName" class="form-label">Tool Name</label>
+          <input
+            type="text"
+            class="form-control"
+            id="toolName"
+            placeholder="exampleTool or anotherTool"
+          />
+        </div>
+        <button class="btn btn-warning" id="addToolBtn">Add Tool</button>
+      </div>
+
+      <!-- START CONVERSATION -->
+      <div class="agent-card">
+        <h5>Start Multi-Agent Conversation</h5>
+        <p>
+          Enter agent IDs in the order you want them to respond, separated by
+          commas.
+        </p>
+        <div class="mb-3">
+          <label for="agentIds" class="form-label"
+            >Agent IDs (comma separated)</label
+          >
+          <input
+            type="text"
+            class="form-control"
+            id="agentIds"
+            placeholder="e.g. 1677804579423, 1677804579555"
+          />
+        </div>
+        <div class="mb-3">
+          <label for="userInput" class="form-label">User Input</label>
+          <textarea class="form-control" id="userInput" rows="2"></textarea>
+        </div>
+        <div class="mb-3">
+          <label for="maxTurns" class="form-label">Max Turns</label>
+          <input
+            type="number"
+            class="form-control"
+            id="maxTurns"
+            placeholder="6"
+          />
+        </div>
+        <button class="btn btn-primary" id="startConversationBtn">
+          Start Conversation
+        </button>
+      </div>
+
+      <!-- RESULT -->
+      <div class="mt-4" id="resultArea"></div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
