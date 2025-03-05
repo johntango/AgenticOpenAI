@@ -138,46 +138,57 @@ async function getCompletionFromAgent(agent, messages) {
       }
 
       // Load all server-side "execute" implementations from /functions
-      const allFunctions = await getFunctions();
+      const allTools = await getTools();
 
-      if (allFunctions[fnName]) {
+      if (allTools[fnName]) {
         // Execute the matching function
-        const result = await allFunctions[fnName].execute(...Object.values(parsedArgs));
+        const result = await allTools[fnName].execute(...Object.values(parsedArgs));
 
-        // Return a "function call" style object, so we can see
-        // what function was called and the result
-        return {
-          role: 'assistant',
-          content: '',
-          function_call: {
+        // Return a "tool call" style object, so we can see
+        // what tool was called and the result
+        const tool_call_result_message = {
+          role: "tool",
+          content: JSON.stringify({result: result}),
+          tool_call_id: response.choices[0].message.tool_calls[0].id
+        };
+        console.log("Tool Call Id :"+tool_call_result_message.tool_call_id);
+        // add to the end of the messages array to send the tool call result back to the model
+        messages.push(response.choices[0].message);
+        messages.push(tool_call_result_message);
+        const completion_payload = {
+            model: agent.model,
+            messages: messages,
+        };
+      // Call the OpenAI API's chat completions endpoint to send the tool call result back to the model
+        const final_response = await openai.chat.completions.create({
+            model: completion_payload.model,
+            messages: completion_payload.messages
+        });
+      // Extract the output from the final response
+        let output = final_response.choices[0].message.content 
+        return { 
+          role: "assistant",
+          tool_call: {
             name: fnName,
-            arguments: JSON.stringify(parsedArgs),
+            arguments: parsedArgs,  // rawArgs
           },
-          function_result: result,
-        };
+          model: agent.model,
+          content: output,
+          message: completion_payload.messages
+        };  
       } else {
-        // The model tried to call a function we don’t have
-        return {
-          role: 'assistant',
-          content: `Function not found: ${fnName}`
-        };
+        return { message: 'No function call detected.' };
       }
+    }else {
+      return {
+        role: message.role,
+        content: message.content
+      };
     }
-
-    // 2) If there's no function call, return the normal text
-    return {
-      role: 'assistant',
-      content: message.content || '',
-    };
-  } catch (err) {
-    console.error('Error calling OpenAI:', err);
-    return {
-      role: 'system',
-      content: 'Error calling OpenAI API.',
-    };
+  } catch (error) {
+      return { error: 'OpenAI API failed', details: error.message };
   }
 }
-
 /**
  * runMultiAgentConductor({
  *   agentIds: number[],
@@ -217,16 +228,15 @@ async function runMultiAgentConductor({ agentIds, messages, max_turns = 6 }) {
     // Add the agent’s response to messages
     result.messages.push({
       role: agentResponse.role,       // 'assistant'
-      name: agent.name,
-      content: JSON.stringify(agentResponse), // might be empty if it was a function call
+      content: agentResponse.content, // might be empty if it was a function call
     });
 
     // If the model called a function, also push the "function_result"
-    if (agentResponse.function_call) {
+    if (agentResponse.tool_call) {
       result.messages.push({
-        role: 'function',
-        name: agentResponse.function_call.name,
-        content: JSON.stringify(agentResponse.function_result),
+        role: 'tool',
+        name: agentResponse.tool_call.name,
+        content: agentResponse.content,
       });
     }
 
@@ -238,43 +248,6 @@ async function runMultiAgentConductor({ agentIds, messages, max_turns = 6 }) {
   return result;
 }
 
-async function getFunctions() {
-   
-    const files = fs.readdirSync(path.resolve(process.cwd(), "./functions"));
-    const openAIFunctions = {};
-
-    for (const file of files) {
-        if (file.endsWith(".js")) {
-            const moduleName = file.slice(0, -3);
-            const modulePath = `./functions/${moduleName}.js`;
-            const { details, execute } = await import(modulePath);
-
-            openAIFunctions[moduleName] = {
-                "details": details,
-                "execute": execute
-            };
-        }
-    }
-    return openAIFunctions;
-}
-async function runFunction(functionName, parameters){
-
-    // Import all functions
-    const functions = await getFunctions();
-
-    if (!functions[functionName]) {
-        return res.status(404).json({ error: 'Function not found' });
-    }
-
-    try {
-        // Call the function
-        const result = await functions[functionName].execute(...Object.values(parameters));
-        console.log(`result: ${JSON.stringify(result)}`);
-        res.json(result);
-    } catch (err) {
-        res.status(500).json({ error: 'Function execution failed', details: err.message });
-    }
-};
 /* ------------------------------------------------------------------
  *  ROUTES
  * ------------------------------------------------------------------ */
@@ -322,10 +295,11 @@ app.post('/create-agent', (req, res) => {
  */
 
 app.post('/add-tool', async (req, res) => {
-  // Expect request body like: { agentId: 123, toolDef: "exampleTool" }
-  const { agentId, toolDef } = req.body;
-  if (!agentId || !toolDef) {
-    return res.status(400).json({ error: 'agentId and toolDef are required' });
+  // Expect request body like: { agentId: 123, toolName: "exampleTool" }
+  // tools will be a dictionary with toolName as key and tool schema and code as value
+  const { agentId, toolName } = req.body;
+  if (!agentId || !toolName) {
+    return res.status(400).json({ error: 'agentId and toolName are required' });
   }
 
   const agent = agents.find(a => a.id === Number(agentId));
@@ -334,17 +308,16 @@ app.post('/add-tool', async (req, res) => {
   }
 
   // If this agent already has this tool name, reject
-  if (agent.tools.includes(toolDef)) {
+  if (agent.tools.some(tool => tool.details.name === toolName)) {
     return res.status(400).json({ error: 'Tool with this name is already assigned.' });
   }
-
   // Append the tool schema to agent's tools array
-  let functions = await getFunctions();
-  agent.tools.push(functions[toolDef]);
+  let tools = await getTools();
+  agent.tools.push(tools[toolName]);
 
   return res.json({ success: true, agent });
 })
-async function getFunctions() {
+async function getTools() {
    
     const files = fs.readdirSync(path.resolve(process.cwd(), "./tools"));
     const openAIFunctions = {};
@@ -393,89 +366,6 @@ app.post('/start-conversation', async (req, res) => {
     console.error(err);
     return res.status(500).json({ error: 'Something went wrong.' });
   }
-});
-// Route to interact with OpenAI API
-app.post('/api/execute-function', async (req, res) => {
-    const { functionName, parameters } = req.body;
-
-    // Import all functions
-    const functions = await getFunctions();
-
-    if (!functions[functionName]) {
-        return res.status(404).json({ error: 'Function not found' });
-    }
-
-    try {
-        // Call the function
-        const result = await functions[functionName].execute(...Object.values(parameters));
-        console.log(`result: ${JSON.stringify(result)}`);
-        res.json(result);
-    } catch (err) {
-        res.status(500).json({ error: 'Function execution failed', details: err.message });
-    }
-});
-// Example to interact with OpenAI API and get function descriptions
-app.post('/api/callTools', async (req, res) => {
-    const { user_message } = req.body;
-
-    const functions = await getFunctions();
-    const availableFunctions = Object.values(functions).map(fn => fn.details);
-    console.log(`availableFunctions: ${JSON.stringify(availableFunctions)}`);
-    let messages = [
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: user_message }
-    ];
-    try {
-        // Make OpenAI API call
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            messages: messages,
-            tools: availableFunctions
-        });
-       
-       // Extract the arguments for get_delivery_date
-// Note this code assumes we have already determined that the model generated a function call. See below for a more production ready example that shows how to check if the model generated a function call
-        const toolCall = response.choices[0].message.tool_calls[0];
-
-// Extract the arguments for get_delivery_date
-// Note this code assumes we have already determined that the model generated a function call. 
-        if (toolCall) {
-            const functionName = toolCall.function.name;
-            const parameters = JSON.parse(toolCall.function.arguments);
-
-            const result = await functions[functionName].execute(...Object.values(parameters));
-// note that we need to respond with the function call result to the model quoting the tool_call_id
-            const function_call_result_message = {
-                role: "tool",
-                content: JSON.stringify({
-                    result: result
-                }),
-                tool_call_id: response.choices[0].message.tool_calls[0].id
-            };
-            // add to the end of the messages array to send the function call result back to the model
-            messages.push(response.choices[0].message);
-            messages.push(function_call_result_message);
-            const completion_payload = {
-                model: "gpt-4o",
-                messages: messages,
-            };
-            // Call the OpenAI API's chat completions endpoint to send the tool call result back to the model
-            const final_response = await openai.chat.completions.create({
-                model: completion_payload.model,
-                messages: completion_payload.messages
-            });
-            // Extract the output from the final response
-            let output = final_response.choices[0].message.content 
-
-
-            res.json({ message:output, state: state });
-        } else {
-            res.json({ message: 'No function call detected.' });
-        }
-
-    } catch (error) {
-        res.status(500).json({ error: 'OpenAI API failed', details: error.message });
-    }
 });
 
 /* ------------------------------------------------------------------

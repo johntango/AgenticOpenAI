@@ -108,8 +108,8 @@ refreshAgentsBtn.addEventListener('click', async () => {
  */
 addToolBtn.addEventListener('click', async () => {
   const agentId = toolAgentIdInput.value.trim();
-  const toolDef = toolNameInput.value.trim();
-  if (!agentId || !toolDef) {
+  const toolName = toolNameInput.value.trim();
+  if (!agentId || !toolName) {
     alert('agentId and toolName are required');
     return;
   }
@@ -117,7 +117,7 @@ addToolBtn.addEventListener('click', async () => {
     const resp = await fetch('/add-tool', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentId, toolDef }),
+      body: JSON.stringify({ agentId, toolName }),
     });
     const data = await resp.json();
     if (!resp.ok) {
