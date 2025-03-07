@@ -9,6 +9,8 @@
  *  - Starting conversation among multiple agents
  */
 
+
+
 // Toggle background color
 const toggleBackgroundBtn = document.getElementById('toggleBackgroundBtn');
 toggleBackgroundBtn.addEventListener('click', () => {
@@ -48,7 +50,7 @@ createAgentBtn.addEventListener('click', async () => {
   const name = agentNameInput.value.trim();
     // Read the selected model from the dropdown
   const model = document.getElementById('modelInput').value;
-  const instructions = agentInstructionsInput.value.trim();
+  const systemMsg = agentInstructionsInput.value.trim();
 
   if (!name || !model) {
     alert('Agent name and model are required');
@@ -59,7 +61,7 @@ createAgentBtn.addEventListener('click', async () => {
     let resp = await fetch('/create-agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, model, instructions }),
+      body: JSON.stringify({ name, model, systemMsg }),
     });
  
     let data = await resp.json();
@@ -163,7 +165,13 @@ startConversationBtn.addEventListener('click', async () => {
       body: JSON.stringify(payload),
     });
     
-    const data = await resp.json();
+    const data = await resp.json(); // turn it back into and object
+    // check if data is a string
+    if (!Array.isArray(data.messages)) {
+      agentsList.innerHTML = 'Invalid data';
+      return;
+    }
+    
     // data => { messages: [ {role, content, name?}, ... ] }
 
     // Display
@@ -171,13 +179,13 @@ startConversationBtn.addEventListener('click', async () => {
     data.messages.forEach((msg, idx) => {
       const p = document.createElement('p');
       if (msg.role === 'assistant') {
-        p.textContent = `[Assistant - ${msg.name}]: ${msg.content}`;
+        p.textContent = `[Assistant]: ${msg.content}`;
       } else if (msg.role === 'user') {
         p.textContent = `[User]: ${msg.content}`;
       } else if (msg.role === 'system') {
         p.textContent = `[System]: ${msg.content}`;
-      } else if (msg.role === 'function') {
-        p.textContent = `[Function - ${msg.name}]: ${msg.content}`;
+      } else if (msg.role === 'tool') {
+        p.textContent = `[Tool - ${msg.name}]: ${msg.content}`;
       }
       resultArea.appendChild(p);
     });

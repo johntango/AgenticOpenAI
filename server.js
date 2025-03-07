@@ -77,13 +77,14 @@ let agents = [];
  * createAgent() - functional factory
  * Tools array can be empty or can be assigned later.
  */
-function createAgent({ name, model, instructions }) {
+function createAgent({ name, model, systemMsg }) {
   return {
     id: Date.now(),
     name,
     model,
-    instructions,
+    systemMsg,  // system message 
     tools: [], // will hold v2 style function definitions
+    history: []  // store the conversation history
   };
 }
 
@@ -99,7 +100,7 @@ async function getCompletionFromAgent(agent, messages) {
   // Prepend system instructions
   const systemMsg = {
     role: 'system',
-    content: agent.instructions || 'You are a helpful agent.',
+    content: agent.systemMsg || 'You are a helpful agent.',
   };
   const chatMessages = [systemMsg, ...messages];
 
@@ -110,13 +111,34 @@ async function getCompletionFromAgent(agent, messages) {
 
   try {
     // Call the Chat Completions API
-    const response = await openai.chat.completions.create({
-      model: agent.model,
-      messages: chatMessages,
-      tools: schema,      // v2 style
-      tool_choice: "auto" // let the model decide if/when to call
-    });
+    // check if schema is emptu, if so, call the model without tool
+    if (schema.length === 0) {
+      const response = await openai.chat.completions.create({
+        model: agent.model,
+        messages: chatMessages,
+      });
+      // check if the response has any code block and extract the code
+      if (response.choices[0].message.content.includes("```")) {
+        const start_index = response.choices[0].message.content.indexOf("```") + 3;
+        const end_index = response.choices[0].message.content.lastIndexOf("```");
+        const extracted_code = response.choices[0].message.content.substring(start_index, end_index);
+        console.log("Extracted Code :"+extracted_code);
+        // write the code to a file
+        fs.writeFileSync(path.resolve(process.cwd(), "./code.py"), extracted_code);
 
+        // add to the end of the messages array to send the tool call result back to the model
+        return {
+          role: 'assistant',
+          content: response.choices[0].message.content,
+        };
+      } else {
+        const response = await openai.chat.completions.create({
+          model: agent.model,
+          messages: chatMessages,
+          tools: schema,      // v2 style
+          tool_choice: "auto" // let the model decide if/when to call
+        });
+    }
     const message = response.choices[0].message;
     if (!message) {
       return {
@@ -148,7 +170,8 @@ async function getCompletionFromAgent(agent, messages) {
         // what tool was called and the result
         const tool_call_result_message = {
           role: "tool",
-          content: JSON.stringify({result: result}),
+          name: fnName,
+          content: JSON.stringify(result),
           tool_call_id: response.choices[0].message.tool_calls[0].id
         };
         console.log("Tool Call Id :"+tool_call_result_message.tool_call_id);
@@ -174,20 +197,18 @@ async function getCompletionFromAgent(agent, messages) {
           },
           model: agent.model,
           content: output,
-          message: completion_payload.messages
+          message: completion_payload.messages // these are the messages that were sent to the model
         };  
       } else {
         return { message: 'No function call detected.' };
       }
-    }else {
-      return {
-        role: message.role,
-        content: message.content
-      };
-    }
-  } catch (error) {
-      return { error: 'OpenAI API failed', details: error.message };
+    }  
+  } else {
+    return { message: 'No function call detected.' };
   }
+} catch (error) {
+  return { error: 'OpenAI API failed', details: error.message };
+}
 }
 /**
  * runMultiAgentConductor({
@@ -228,17 +249,18 @@ async function runMultiAgentConductor({ agentIds, messages, max_turns = 6 }) {
     // Add the agent’s response to messages
     result.messages.push({
       role: agentResponse.role,       // 'assistant'
-      content: agentResponse.content, // might be empty if it was a function call
+      content: agentResponse.content, // this is response from the model after tool call 
     });
 
     // If the model called a function, also push the "function_result"
-    if (agentResponse.tool_call) {
+    /*f (agentResponse.tool_call) {
       result.messages.push({
         role: 'tool',
         name: agentResponse.tool_call.name,
-        content: agentResponse.content,
+        content: agentResponse.message,  // these are the messages that were sent to the model
       });
     }
+    */
 
     // Round-robin: move to next agent
     agentIndex = (agentIndex + 1) % agentIds.length;
@@ -266,12 +288,12 @@ app.get('/agents', (req, res) => {
  * Creates and stores a new agent
  */
 app.post('/create-agent', (req, res) => {
-  const { name, model, instructions } = req.body;
+  const { name, model, systemMsg } = req.body;
   if (!name || !model) {
     return res.status(400).json({ error: 'name and model are required' });
   }
 
-  const newAgent = createAgent({ name, model, instructions });
+  const newAgent = createAgent({ name, model, systemMsg });
   agents.push(newAgent);
   return res.json({success: true, newagent: newAgent});
 });
@@ -361,7 +383,7 @@ app.post('/start-conversation', async (req, res) => {
       max_turns: maxTurns || 6,
     });
 
-    return res.json(conversation);
+    res.json(conversation);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Something went wrong.' });
